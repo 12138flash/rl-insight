@@ -16412,7 +16412,7 @@
                       "spec": {
                         "limit": 10000,
                         "metricsQueryType": "range",
-                        "query": "{span.state_lane_id!=\"\"}",
+                        "query": "{span.state_lane_id != \"\" && resource.service.name != \"agent-loop-poc\"}",
                         "queryType": "traceql",
                         "serviceMapUseNativeHistograms": false,
                         "spss": 100,
