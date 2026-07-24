@@ -27,7 +27,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from rl_insight.experimental.agent_loop_constants import (
+from rl_insight.experimental.agent_loop.constants import (
     DEFAULT_REBUILD_API_BASE,
     GRAFANA_DASHBOARD_FILE,
     SERVICE_NAME_VALUE,
@@ -36,7 +36,7 @@ from rl_insight.experimental.agent_loop_constants import (
 logger = logging.getLogger(__name__)
 
 AGENT_LOOP_TITLE = "Agent Loop Trajectory"
-_TEMPLATES_PATH = Path(__file__).resolve().parent / "agent_loop_panel_templates.json"
+_TEMPLATES_PATH = Path(__file__).resolve().parent / "panel_templates.json"
 
 
 def _rebuild_api_base() -> str:
@@ -72,7 +72,7 @@ def rebuild_dashboard_link() -> dict[str, Any]:
 
 
 _DEFAULT_BUNDLED = (
-    Path(__file__).resolve().parent.parent
+    Path(__file__).resolve().parent.parent.parent.parent
     / "config"
     / "services"
     / "grafana"
@@ -159,7 +159,7 @@ def _details_query(
     base = _traj_query(run_id, sample_i, session_i, traj_i, service_name)
     return (
         f"{base} | select(span.turn, span.state_name, span.type, span.tools, "
-        f"span.finish_reason, span.content, span.reward)"
+        f"span.finish_reason, span.content)"
     )
 
 
@@ -313,10 +313,8 @@ def _build_sample_rows(
             for traj in trajs:
                 counters["trajectories"] += 1
                 ti = int(traj.get("trajectory_index", 0))
-                reward = traj.get("reward")
-                reward_s = "0.0" if reward in (None, "") else str(reward)
                 traj_title = (
-                    f"Trajectory #{ti} · reward {reward_s} · "
+                    f"Trajectory #{ti} · "
                     f"{int(traj.get('num_turns') or 0)} turns"
                 )
                 seq_name = f"agent-panel-seq-{slug}-{si}-{sess_i}-{ti}"
@@ -484,6 +482,54 @@ def slim_bundled_dashboard(bundled_path: Path | None = None) -> Path:
     strip_agent_loop(dashboard)
     path.write_text(json.dumps(dashboard, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+class AgentLoopDashboardWriter:
+    """Write nested Agent Loop Grafana panels from run hierarchies."""
+
+    def __init__(
+        self,
+        service_name: str = SERVICE_NAME_VALUE,
+        bundled_path: Path | None = None,
+        runtime_path: Path | None = None,
+    ) -> None:
+        self.service_name = service_name
+        self.bundled_path = bundled_path
+        self.runtime_path = runtime_path
+
+    def write(
+        self,
+        run_hierarchies: list[dict[str, Any]],
+        *,
+        write_bundled: bool = False,
+        window_from: int | None = None,
+        window_to: int | None = None,
+    ) -> dict[str, Any]:
+        return write_agent_loop_from_runs(
+            run_hierarchies,
+            bundled_path=self.bundled_path,
+            runtime_path=self.runtime_path,
+            write_bundled=write_bundled,
+            service_name=self.service_name,
+            window_from=window_from,
+            window_to=window_to,
+        )
+
+    def rebuild_in_memory(
+        self,
+        dashboard: dict[str, Any],
+        run_hierarchies: list[dict[str, Any]],
+        *,
+        window_from: int | None = None,
+        window_to: int | None = None,
+    ) -> dict[str, Any]:
+        return rebuild_agent_loop_from_runs(
+            dashboard,
+            run_hierarchies,
+            service_name=self.service_name,
+            window_from=window_from,
+            window_to=window_to,
+        )
 
 
 # Back-compat wrappers

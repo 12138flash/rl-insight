@@ -36,7 +36,7 @@ if str(_project_root) not in sys.path:
 
 from rl_insight.experimental.builder import TrajectoryBuilder  # noqa: E402
 from rl_insight.experimental.generate_data import generate  # noqa: E402
-from rl_insight.experimental.tempo_export import (  # noqa: E402
+from rl_insight.experimental.agent_loop import (  # noqa: E402
     SERVICE_NAME_VALUE,
     export_samples_to_tempo,
 )

@@ -199,10 +199,10 @@ def create_app(conf: DictConfig) -> FastAPI:
         gap_s: float = 300.0,
         write_bundled: bool = False,
     ) -> dict[str, Any]:
-        from rl_insight.experimental.agent_loop_constants import (  # noqa: PLC0415
+        from rl_insight.experimental.agent_loop.constants import (  # noqa: PLC0415
             SERVICE_NAME_VALUE,
         )
-        from rl_insight.experimental.agent_loop_rebuild import (  # noqa: PLC0415
+        from rl_insight.experimental.agent_loop.rebuild.service import (  # noqa: PLC0415
             rebuild_from_tempo,
         )
 
@@ -229,10 +229,13 @@ def create_app(conf: DictConfig) -> FastAPI:
         run_id: Optional[str] = Query(None),
     ) -> Response:
         """Dashboard-link target: Rebuild, then bounce back to Grafana (same tab)."""
-        from rl_insight.experimental.agent_loop_constants import (  # noqa: PLC0415
+        from rl_insight.experimental.agent_loop.constants import (  # noqa: PLC0415
             DEFAULT_GRAFANA_BASE,
             GRAFANA_DASHBOARD_SLUG,
             GRAFANA_DASHBOARD_UID,
+        )
+        from rl_insight.experimental.agent_loop.dashboard.writer import (  # noqa: PLC0415
+            write_agent_loop_from_runs,
         )
 
         start = _unix_seconds(from_ts)
@@ -243,10 +246,6 @@ def create_app(conf: DictConfig) -> FastAPI:
             # Still clear panels + bounce back; never leave the user on an error page.
             logger.exception("agent-loop rebuild/go failed: %s", exc)
             try:
-                from rl_insight.experimental.generate_agent_loop_dashboard import (  # noqa: PLC0415
-                    write_agent_loop_from_runs,
-                )
-
                 write_agent_loop_from_runs(
                     [], window_from=start, window_to=end
                 )

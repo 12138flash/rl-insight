@@ -35,13 +35,12 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-from rl_insight.experimental.agent_loop_constants import SERVICE_NAME_VALUE
+from rl_insight.experimental.agent_loop.constants import SERVICE_NAME_VALUE
 from rl_insight.experimental.samples.sample import SampleRecord, Step, TrajectoryRecord
 
 logger = logging.getLogger(__name__)
 
-# Re-export for older imports.
-_TRACER_NAME = "rl-insight.experimental.tempo_export"
+_TRACER_NAME = "rl-insight.experimental.agent_loop.mapper"
 
 
 def new_run_id() -> str:
@@ -93,7 +92,7 @@ def _coerce_sample(sample: Any) -> SampleRecord:
         if isinstance(loaded, SampleRecord):
             return loaded
     raise TypeError(
-        f"tempo_export expects SampleRecord-like output, got {type(sample)!r}"
+        f"tempo mapper expects SampleRecord-like output, got {type(sample)!r}"
     )
 
 
@@ -138,8 +137,6 @@ def samples_to_span_dicts(
             sess_i = int(session.session_index)
             for traj in session.trajectories:
                 ti = int(traj.trajectory_index)
-                reward = traj.reward_score
-                reward_s = "" if reward is None else str(reward)
                 steps = list(traj.steps)
                 for idx, step in enumerate(steps):
                     start_ns = clock
@@ -161,7 +158,6 @@ def samples_to_span_dicts(
                         "type": _step_type(step),
                         "tools": json.dumps(_tool_names(step), ensure_ascii=False),
                         "content": (step.thought or step.response or "")[:500],
-                        "reward": reward_s,
                         "monitor.trace_segment": "state_interval",
                         "state_name": name,
                         "finish_reason": name,
@@ -254,6 +250,72 @@ def flush_span_dicts(
     return total
 
 
+class TempoSpanMapper:
+    """Map SampleRecord trees to Tempo state spans and flush via OTLP."""
+
+    def __init__(
+        self,
+        endpoint: str = "http://127.0.0.1:4318/v1/traces",
+        service_name: str = SERVICE_NAME_VALUE,
+        step_duration_s: float = 1.0,
+        batch_size: int = 50,
+        pause_s: float = 0.15,
+        window_s: float = 1800.0,
+    ) -> None:
+        self.endpoint = endpoint
+        self.service_name = service_name
+        self.step_duration_s = step_duration_s
+        self.batch_size = batch_size
+        self.pause_s = pause_s
+        self.window_s = window_s
+
+    def map(
+        self,
+        samples: Iterable[Any],
+        *,
+        run_id: str,
+        clock_start_ns: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return samples_to_span_dicts(
+            samples,
+            run_id=run_id,
+            step_duration_s=self.step_duration_s,
+            clock_start_ns=clock_start_ns,
+        )
+
+    def flush(self, spans: list[dict[str, Any]]) -> int:
+        return flush_span_dicts(
+            spans,
+            endpoint=self.endpoint,
+            service_name=self.service_name,
+            batch_size=self.batch_size,
+            pause_s=self.pause_s,
+            window_s=self.window_s,
+        )
+
+    def export(
+        self,
+        samples: Iterable[Any],
+        *,
+        run_id: str | None = None,
+        wait: bool = True,
+        wait_timeout_s: float = 60.0,
+    ) -> dict[str, Any]:
+        """Map finished samples → Tempo. Returns ``{run_id, spans, service_name}``."""
+        rid = run_id or new_run_id()
+        if wait:
+            wait_for_otlp(self.endpoint, timeout_s=wait_timeout_s)
+        span_dicts = self.map(samples, run_id=rid)
+        n = self.flush(span_dicts)
+        logger.info(
+            "mapper export done: run_id=%s spans=%s service.name=%s",
+            rid,
+            n,
+            self.service_name,
+        )
+        return {"run_id": rid, "spans": n, "service_name": self.service_name}
+
+
 def export_samples_to_tempo(
     samples: Iterable[Any],
     *,
@@ -268,24 +330,17 @@ def export_samples_to_tempo(
     window_s: float = 1800.0,
 ) -> dict[str, Any]:
     """Map finished samples → Tempo. Returns ``{run_id, spans, service_name}``."""
-    rid = run_id or new_run_id()
-    if wait:
-        wait_for_otlp(endpoint, timeout_s=wait_timeout_s)
-    span_dicts = samples_to_span_dicts(
-        samples, run_id=rid, step_duration_s=step_duration_s
-    )
-    n = flush_span_dicts(
-        span_dicts,
+    mapper = TempoSpanMapper(
         endpoint=endpoint,
         service_name=service_name,
+        step_duration_s=step_duration_s,
         batch_size=batch_size,
         pause_s=pause_s,
         window_s=window_s,
     )
-    logger.info(
-        "tempo_export done: run_id=%s spans=%s service.name=%s",
-        rid,
-        n,
-        service_name,
+    return mapper.export(
+        samples,
+        run_id=run_id,
+        wait=wait,
+        wait_timeout_s=wait_timeout_s,
     )
-    return {"run_id": rid, "spans": n, "service_name": service_name}
